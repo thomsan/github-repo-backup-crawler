@@ -32,6 +32,7 @@ def clone_or_pull_repo(repo_url, repo_dir):
         # If the directory exists, pull the latest changes
         print(f"Updating repository: {repo_dir}")
         try:
+            check_call(["git", "-C", repo_dir, "reset", "--hard"])
             check_call(["git", "-C", repo_dir, "pull"])
         except CalledProcessError as e:
             print(f"Error updating repository {repo_dir}: {e}")
