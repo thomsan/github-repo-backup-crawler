@@ -6,7 +6,6 @@ This script allows you to back up all your GitHub repositories to a specified di
 
 - Python
 - Git
-- GitHub Personal Access Token
 
 ## Installation
 
@@ -66,8 +65,9 @@ The script performs the following steps:
 ### Notes
 
 1. Ensure the backup directory exists and is writable.
-2. The token file should have read permissions for the user running the script. If you're running the script with --include-orgs, the token should have org:read permissions.
-3. Ensure git is installed and accessible from the command line.
+2. The token file should have `repo` permission.
+3. If you're running the script with `--include-orgs`, the token should have `read:org` permission.
+4. Ensure git is installed and accessible from the command line.
 
 ## License
 
