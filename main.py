@@ -13,17 +13,55 @@ def get_github_token(file_path):
         return file.read().strip()
 
 
-# Function to get repositories from GitHub
-def get_repositories(username, token):
-    url = f"https://api.github.com/user/repos"
+# Function to get repositories from GitHub user, handling pagination
+def get_user_repositories(username, token):
+    repos = []
+    page = 1
+    while True:
+        url = f"https://api.github.com/user/repos"
+        headers = {"Authorization": f"token {token}"}
+        params = {
+            "visibility": "all",  # Can be 'all', 'public', or 'private'
+            "affiliation": "owner",  # Repositories that the authenticated user owns
+            "per_page": 100,  # Number of repos per page
+            "page": page,  # Page number
+        }
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        page_repos = response.json()
+        if not page_repos:
+            break
+        repos.extend(page_repos)
+        page += 1
+    return repos
+
+
+# Function to get repositories from an organization, handling pagination
+def get_org_repositories(org_name, token):
+    repos = []
+    page = 1
+    while True:
+        url = f"https://api.github.com/orgs/{org_name}/repos"
+        headers = {"Authorization": f"token {token}"}
+        params = {"per_page": 100, "page": page}  # Number of repos per page  # Page number
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        page_repos = response.json()
+        if not page_repos:
+            break
+        repos.extend(page_repos)
+        page += 1
+    return repos
+
+
+# Function to get organizations a user is part of
+def get_user_orgs(username, token):
+    url = f"https://api.github.com/user/orgs"
     headers = {"Authorization": f"token {token}"}
-    params = {
-        "visibility": "all",  # Can be 'all', 'public', or 'private'
-        "affiliation": "owner",  # Repositories that the authenticated user owns
-    }
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers)
     response.raise_for_status()
-    return response.json()
+    orgs = response.json()
+    return [org["login"] for org in orgs]
 
 
 # Function to clone or pull a repository
@@ -65,15 +103,8 @@ def unzip_directory(zip_path, extract_to):
     print(f"Unzipped to: {extract_to}")
 
 
-# Main function
-def main(username, backup_dir):
-    token_file = "github_token.txt"
-    # Ensure the backup directory exists
-    if not os.path.exists(backup_dir):
-        os.makedirs(backup_dir)
-
-    token = get_github_token(token_file)
-    repos = get_repositories(username, token)
+# Function to backup repositories
+def backup_repositories(repos, backup_dir):
     for repo in repos:
         repo_name = repo["name"]
         repo_dir = os.path.join(backup_dir, repo_name)
@@ -99,11 +130,39 @@ def main(username, backup_dir):
             shutil.rmtree(repo_dir)
 
 
+# Main function
+def main(username, backup_dir, include_orgs):
+    token_file = "github_token.txt"
+    # Ensure the backup directory exists
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+
+    token = get_github_token(token_file)
+
+    # Backup personal repositories
+    user_backup_dir = os.path.join(backup_dir, username)
+    os.makedirs(user_backup_dir, exist_ok=True)
+    user_repos = get_user_repositories(username, token)
+    print(f"Found {len(user_repos)} personal repositories.")
+    backup_repositories(user_repos, user_backup_dir)
+
+    # Backup organization repositories if flag is set
+    if include_orgs:
+        org_names = get_user_orgs(username, token)
+        for org_name in org_names:
+            org_backup_dir = os.path.join(backup_dir, org_name)
+            os.makedirs(org_backup_dir, exist_ok=True)
+            org_repos = get_org_repositories(org_name, token)
+            print(f"Found {len(org_repos)} organization repositories in {org_name}.")
+            backup_repositories(org_repos, org_backup_dir)
+
+
 if __name__ == "__main__":
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Backup GitHub repositories.")
     parser.add_argument("username", help="GitHub username")
     parser.add_argument("backup_dir", help="Directory to backup repositories to")
+    parser.add_argument("--include-orgs", action="store_true", help="Include organization repositories")
 
     args = parser.parse_args()
-    main(args.username, args.backup_dir)
+    main(args.username, args.backup_dir, args.include_orgs)
