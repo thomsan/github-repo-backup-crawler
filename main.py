@@ -1,10 +1,16 @@
 import argparse
+import logging
 import os
 import shutil
 import zipfile
 from subprocess import CalledProcessError, check_call
 
 import requests
+
+# Set up logging
+logging.basicConfig(
+    filename="backup.log", filemode="w", format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 
 # Function to read GitHub token from a file
@@ -68,43 +74,47 @@ def get_user_orgs(username, token):
 def clone_or_pull_repo(repo_url, repo_dir):
     if os.path.exists(repo_dir):
         # If the directory exists, pull the latest changes
-        print(f"Updating repository: {repo_dir}")
+        logging.info(f"Updating repository: {repo_dir}")
         try:
             check_call(["git", "-C", repo_dir, "reset", "--hard"])
             check_call(["git", "-C", repo_dir, "pull"])
         except CalledProcessError as e:
-            print(f"Error updating repository {repo_dir}: {e}")
+            logging.error(f"Error updating repository {repo_dir}: {e}")
+            return False
     else:
         # If the directory doesn't exist, clone the repository
-        print(f"Cloning repository: {repo_url}")
+        logging.info(f"Cloning repository: {repo_url}")
         try:
             check_call(["git", "clone", repo_url, repo_dir])
         except CalledProcessError as e:
-            print(f"Error cloning repository {repo_url}: {e}")
+            logging.error(f"Error cloning repository {repo_url}: {e}")
+            return False
+    return True
 
 
 # Function to zip a directory
 def zip_directory(directory_path):
     zip_path = f"{directory_path}.zip"
-    print(f"Zipping directory: {directory_path}")
+    logging.info(f"Zipping directory: {directory_path}")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(directory_path):
             for file in files:
                 file_path = os.path.join(root, file)
                 zipf.write(file_path, os.path.relpath(file_path, directory_path))
-    print(f"Zipped directory to: {zip_path}")
+    logging.info(f"Zipped directory to: {zip_path}")
 
 
 # Function to unzip a directory
 def unzip_directory(zip_path, extract_to):
-    print(f"Unzipping file: {zip_path}")
+    logging.info(f"Unzipping file: {zip_path}")
     with zipfile.ZipFile(zip_path, "r") as zip_ref:
         zip_ref.extractall(extract_to)
-    print(f"Unzipped to: {extract_to}")
+    logging.info(f"Unzipped to: {extract_to}")
 
 
 # Function to backup repositories
-def backup_repositories(repos, backup_dir):
+def backup_repositories(repos, backup_dir, summary, entity_name):
+    success_count = 0
     for repo in repos:
         repo_name = repo["name"]
         repo_dir = os.path.join(backup_dir, repo_name)
@@ -119,7 +129,8 @@ def backup_repositories(repos, backup_dir):
             os.remove(zip_path)
 
         # Clone or pull the repository
-        clone_or_pull_repo(repo["clone_url"], repo_dir)
+        if clone_or_pull_repo(repo["clone_url"], repo_dir):
+            success_count += 1
 
         # Zip the repository directory
         if os.path.exists(repo_dir):
@@ -128,6 +139,8 @@ def backup_repositories(repos, backup_dir):
         # Remove the repository directory
         if os.path.exists(repo_dir):
             shutil.rmtree(repo_dir)
+
+    summary[entity_name] = {"success": success_count, "failed": len(repos) - success_count}
 
 
 # Main function
@@ -138,13 +151,14 @@ def main(username, backup_dir, include_orgs):
         os.makedirs(backup_dir)
 
     token = get_github_token(token_file)
+    summary = {}
 
     # Backup personal repositories
     user_backup_dir = os.path.join(backup_dir, username)
     os.makedirs(user_backup_dir, exist_ok=True)
     user_repos = get_user_repositories(username, token)
-    print(f"Found {len(user_repos)} personal repositories.")
-    backup_repositories(user_repos, user_backup_dir)
+    logging.info(f"Found {len(user_repos)} personal repositories.")
+    backup_repositories(user_repos, user_backup_dir, summary, username)
 
     # Backup organization repositories if flag is set
     if include_orgs:
@@ -153,8 +167,14 @@ def main(username, backup_dir, include_orgs):
             org_backup_dir = os.path.join(backup_dir, org_name)
             os.makedirs(org_backup_dir, exist_ok=True)
             org_repos = get_org_repositories(org_name, token)
-            print(f"Found {len(org_repos)} organization repositories in {org_name}.")
-            backup_repositories(org_repos, org_backup_dir)
+            logging.info(f"Found {len(org_repos)} organization repositories in {org_name}.")
+            backup_repositories(org_repos, org_backup_dir, summary, org_name)
+
+    # Print summary
+    print("\nBackup Summary:")
+    for entity_name, counts in summary.items():
+        print(f"Backed up {counts['success']} repos for {entity_name} with {counts['failed']} errors")
+    print("Check backup.log for details.")
 
 
 if __name__ == "__main__":
